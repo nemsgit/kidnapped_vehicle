@@ -22,9 +22,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// Add random Gaussian noise to each particle.
 	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
 
-	num_particles = 10;
-	particles.resize(num_particles);
-    weights.resize(num_particles);
+	num_particles = 20;
 
 	default_random_engine gen;
 	normal_distribution<double> N_x_init(x, std[0]);
@@ -33,14 +31,16 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 
 	for (unsigned int i = 0; i < num_particles; ++i) {
 		// initialize id, x, y, theta, and weight for each particle
-        particles[i].id = i;
-		particles[i].x = N_x_init(gen);
-		particles[i].y = N_y_init(gen);
-		particles[i].theta = N_theta_init(gen);
-		particles[i].weight = 1.0;
+        Particle p_temp;
+        p_temp.id = i;
+		p_temp.x = N_x_init(gen);
+		p_temp.y = N_y_init(gen);
+		p_temp.theta = N_theta_init(gen);
+		p_temp.weight = 1.0;
+        particles.push_back(p_temp);
 
         // initialize weights vector with normalized weights
-        weights[i] = 1.0 / num_particles;
+        weights.push_back(1.0 / num_particles);
 	}
     // set is_initialized to true
     is_initialized = true;
@@ -51,25 +51,35 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	// NOTE: When adding noise you may find std::normal_distribution and std::default_random_engine useful.
 	//  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
+
+    // Set up random engine and normal distribution
+    default_random_engine gen;
+    normal_distribution<double> N_x(0, std_pos[0]);
+    normal_distribution<double> N_y(0, std_pos[1]);
+    normal_distribution<double> N_theta(0, std_pos[2]);
+
 	for (unsigned int i = 0; i < num_particles; ++i) {
 		// Predict new position
 		double x_f, y_f, theta_f;
 		double x0 = particles[i].x;
 		double y0 = particles[i].y;
 		double theta0 = particles[i].theta;
-		x_f = x0 + velocity / yaw_rate * (sin(theta0 + yaw_rate * delta_t) - sin(theta0));
-		y_f = y0 + velocity / yaw_rate * (cos(theta0) - cos(theta0 + yaw_rate * delta_t));
-		theta_f = theta0 + yaw_rate * delta_t;
+
+        if (fabs(yaw_rate) < 0.001) { // yaw_rate close to zero
+            x_f = x0 + velocity * delta_t * cos(theta0);
+            y_f = y0 + velocity * delta_t * sin(theta0);
+            theta_f = theta0;
+        }
+        else { // yaw rate is sufficiently large
+            x_f = x0 + velocity / yaw_rate * (sin(theta0 + yaw_rate * delta_t) - sin(theta0));
+            y_f = y0 + velocity / yaw_rate * (cos(theta0) - cos(theta0 + yaw_rate * delta_t));
+            theta_f = theta0 + yaw_rate * delta_t;
+        }
 
 		// Add noise
-		default_random_engine gen;
-		normal_distribution<double> N_x(x_f, std_pos[0]);
-		normal_distribution<double> N_y(y_f, std_pos[1]);
-		normal_distribution<double> N_theta(theta_f, std_pos[2]);
-
-		particles[i].x = N_x(gen);
-		particles[i].y = N_y(gen);
-		particles[i].theta = N_theta(gen);
+		particles[i].x = x_f + N_x(gen);
+		particles[i].y = y_f + N_y(gen);
+		particles[i].theta = theta_f + N_theta(gen);
 	}
 
 }
@@ -80,6 +90,7 @@ void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::ve
 	// NOTE: this method will NOT be called by the grading code. But you will probably find it useful to 
 	//   implement this method and use it as a helper during the updateWeights phase.
 
+    // This function is not used in the implementation.
 
 }
 
@@ -102,7 +113,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 
 	// loop through all particles
 	for (unsigned int i = 0; i < num_particles; ++i) {
-        // define probability of each particle
+        // initialize weight of each particle
         double prob = 1.0;
 
         // get particle position and yaw angle
@@ -146,7 +157,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
                     exp (-0.5 * ((x_diff * x_diff / (std_landmark[0] * std_landmark[0])) +
                                  (y_diff * y_diff / (std_landmark[1] * std_landmark[1]))));
         }
-        // update unnormalized weight to each particle
+        // update un-normalized weight to each particle
         particles[i].weight = prob;
         // calculate sum_prob to normalize the weights in the weights vector
         sum_prob += prob;
@@ -162,7 +173,7 @@ void ParticleFilter::resample() {
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
     vector<Particle> new_particles;
     default_random_engine gen;
-    discrete_distribution<> distribution(weights.begin(), weights.end());
+    discrete_distribution<int> distribution(weights.begin(), weights.end());
     for (unsigned int i = 0; i < num_particles; ++i) {
         int weighted_index = distribution(gen);
         new_particles.push_back(particles[weighted_index]);
