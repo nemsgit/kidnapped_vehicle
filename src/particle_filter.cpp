@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <iostream>
 #include <numeric>
-
+#include "helper_functions.h"
 
 
 #include "particle_filter.h"
@@ -24,6 +24,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 
 	num_particles = 10;
 	particles.resize(num_particles);
+    weights.resize(num_particles);
 
 	default_random_engine gen;
 	normal_distribution<double> N_x_init(x, std[0]);
@@ -31,12 +32,18 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	normal_distribution<double> N_theta_init(theta, std[2]);
 
 	for (unsigned int i = 0; i < num_particles; ++i) {
-		particles[i].id = i;
+		// initialize id, x, y, theta, and weight for each particle
+        particles[i].id = i;
 		particles[i].x = N_x_init(gen);
 		particles[i].y = N_y_init(gen);
 		particles[i].theta = N_theta_init(gen);
 		particles[i].weight = 1.0;
+
+        // initialize weights vector with normalized weights
+        weights[i] = 1.0 / num_particles;
 	}
+    // set is_initialized to true
+    is_initialized = true;
 }
 
 void ParticleFilter::prediction(double delta_t, double std_pos[], double velocity, double yaw_rate) {
@@ -90,24 +97,77 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   for the fact that the map's y-axis actually points downwards.)
 	//   http://planning.cs.uiuc.edu/node99.html
 
+    // record sum of weights for normalization
+    double sum_prob = 0.0;
+
 	// loop through all particles
 	for (unsigned int i = 0; i < num_particles; ++i) {
-		// select landmarks within sensor_range
-		vector<LandmarkObs> predicted_landmarks; {
-			
-		}
+        // define probability of each particle
+        double prob = 1.0;
 
+        // get particle position and yaw angle
+        double x_p = particles[i].x;
+        double y_p = particles[i].y;
+        double theta = particles[i].theta;
+
+		// select landmarks within sensor_range
+		vector<Map::single_landmark_s> predicted_landmarks;
+		for (unsigned int j = 0; j < map_landmarks.landmark_list.size(); ++j) {
+            double x_landmark = map_landmarks.landmark_list[j].x_f;
+            double y_landmark = map_landmarks.landmark_list[j].y_f;
+            if (dist(x_landmark, y_landmark, x_p, y_p) <= sensor_range)
+                predicted_landmarks.push_back(map_landmarks.landmark_list[j]);
+        }
+
+        // loop through all observations
+        for (unsigned int j = 0; j < observations.size(); ++j) {
+            // convert local coordinates to global coordinates
+            double x_local = observations[j].x;
+            double y_local = observations[j].y;
+            double x_global = x_local * cos(theta) - y_local * sin(theta) + x_p;
+            double y_global = x_local * sin(theta) + y_local * cos(theta) + y_p;
+
+            // loop through predicted_landmarks and find the closest one
+            double min_dist = sensor_range;
+            double x_diff = sensor_range;
+            double y_diff = sensor_range;
+            for (unsigned int k = 0; k < predicted_landmarks.size(); ++k) {
+                double x_landmark = predicted_landmarks[k].x_f;
+                double y_landmark = predicted_landmarks[k].y_f;
+                if (dist(x_landmark, y_landmark, x_global, y_global) < min_dist) {
+                    min_dist = dist(x_landmark, y_landmark, x_global, y_global);
+                    x_diff = x_landmark - x_global;
+                    y_diff = y_landmark - y_global;
+                }
+            }
+
+            // update probability wrt each observation
+            prob *= (1 / (2 * M_PI * std_landmark[0] * std_landmark[1])) *
+                    exp (-0.5 * ((x_diff * x_diff / (std_landmark[0] * std_landmark[0])) +
+                                 (y_diff * y_diff / (std_landmark[1] * std_landmark[1]))));
+        }
+        // update unnormalized weight to each particle
+        particles[i].weight = prob;
+        // calculate sum_prob to normalize the weights in the weights vector
+        sum_prob += prob;
 	}
 
-
-
+    // update the weights vector with normalized weights
+    for (unsigned int i = 0; i < num_particles; ++i) weights[i] = particles[i].weight / sum_prob;
 }
 
 void ParticleFilter::resample() {
 	// TODO: Resample particles with replacement with probability proportional to their weight. 
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
-
+    vector<Particle> new_particles;
+    default_random_engine gen;
+    discrete_distribution<> distribution(weights.begin(), weights.end());
+    for (unsigned int i = 0; i < num_particles; ++i) {
+        int weighted_index = distribution(gen);
+        new_particles.push_back(particles[weighted_index]);
+    }
+    particles = new_particles;
 }
 
 void ParticleFilter::write(std::string filename) {
